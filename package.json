@@ -1,6 +1,6 @@
 {
   "name": "browserify-esprima-tools",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Tools for creating Browserify transforms with Esprima",
   "main": "index.js",
   "scripts": {},
