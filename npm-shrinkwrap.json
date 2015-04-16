@@ -1,11 +1,11 @@
 {
   "name": "browserify-esprima-tools",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "dependencies": {
     "convert-source-map": {
-      "version": "1.0.0",
-      "from": "convert-source-map@latest",
-      "resolved": "https://registry.npmjs.org/convert-source-map/-/convert-source-map-1.0.0.tgz"
+      "version": "0.4.1",
+      "from": "convert-source-map@0.4.1",
+      "resolved": "https://registry.npmjs.org/convert-source-map/-/convert-source-map-0.4.1.tgz"
     },
     "escodegen": {
       "version": "1.6.1",
