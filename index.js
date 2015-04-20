@@ -97,6 +97,36 @@ function orderNodes(ast) {
 }
 
 /**
+ * Recursively find all nodes specified within the given node.
+ * @param {object} node An esprima node
+ * @param {object|undefined} [parent] The parent of the given node, where known
+ * @returns {Array} A list of nodes
+ */
+function findNodes(node, parent) {
+  var results = [];
+
+  // valid node so push it to the list and set new parent
+  if ('type' in node) {
+    node.parent = parent;
+    parent      = node;
+    results.push(node);
+  }
+
+  // recurse object members using the queue
+  for (var key in node) {
+    if (WHITE_LIST.test(key)) {
+      var value = node[key];
+      if (value && (typeof value === 'object')) {
+        results.push.apply(results, findNodes(value, parent));
+      }
+    }
+  }
+
+  // complete
+  return results;
+}
+
+/**
  * Create a setter that will replace the given node.
  * @param {object} candidate An esprima AST node to match
  * @param {number} [offset] 0 to replace, -1 to prepend, +1 to append
@@ -137,6 +167,7 @@ function nodeSplicer(candidate, offset) {
 module.exports = {
   createTransform: createTransform,
   orderNodes     : orderNodes,
+  findNodes      : findNodes,
   nodeSplicer    : nodeSplicer
 };
 
@@ -159,36 +190,6 @@ function associateComments(ast) {
       // comments generally can't be converted by source-map and won't be considered by sourcemap-to-ast
       delete comment.loc;
     });
-}
-
-/**
- * Recursively find all nodes specified within the given node.
- * @param {object} node An esprima node
- * @param {object|undefined} [parent] The parent of the given node, where known
- * @returns {Array} A list of nodes
- */
-function findNodes(node, parent) {
-  var results = [];
-
-  // valid node so push it to the list and set new parent
-  if ('type' in node) {
-    node.parent = parent;
-    parent      = node;
-    results.push(node);
-  }
-
-  // recurse object members using the queue
-  for (var key in node) {
-    if (WHITE_LIST.test(key)) {
-      var value = node[key];
-      if (value && (typeof value === 'object')) {
-        results.push.apply(results, findNodes(value, parent));
-      }
-    }
-  }
-
-  // complete
-  return results;
 }
 
 /**
