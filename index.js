@@ -87,60 +87,25 @@ function createTransform(updater, format) {
 }
 
 /**
- * Sort nodes by location, include comments, create parent reference
+ * Sort given node an all children by location, include comments, create parent reference
  * @param {object} ast The esprima syntax tree
  */
 function orderNodes(ast) {
-  return (Array.isArray(ast.comments) ? ast.comments.slice() : [])
+  var comments = Array.isArray(ast.comments) ? ast.comments.slice() : [];
+  return comments
     .concat(depthFirst(ast, ast.parent))
     .sort(compareLocation);
 }
 
 /**
- * Recursively find all nodes specified within the given node, depth first.
+ * List the given node and all children, depth first.
  * @param {object} node An esprima node
  * @param {object|undefined} [parent] The parent of the given node, where known
  * @returns {Array} A list of nodes
  */
 function depthFirst(node, parent) {
   var results = [];
-
-  // valid node so push it to the list and set new parent
-  if ('type' in node) {
-    node.parent = parent;
-    parent      = node;
-    results.push(node);
-  }
-
-  // recurse object members using nested function call
-  for (var key in node) {
-    if (WHITE_LIST.test(key)) {
-      var value = node[key];
-      if (value && (typeof value === 'object')) {
-        results.push.apply(results, depthFirst(value, parent));
-      }
-    }
-  }
-
-  // complete
-  return results;
-}
-
-/**
- * Recursively find all nodes specified within the given node, breadth first.
- * @param {object} node An esprima node
- * @param {object|undefined} [parent] The parent of the given node, where known
- * @returns {Array} A list of nodes
- */
-function breadthFirst(node, parent) {
-  var results = [];
-  var queue   = [{node:node, parent:parent}];
-  while (queue.length) {
-
-    // pull the next item from the front of the queue
-    var item   = queue.shift();
-    var node   = item.node;
-    var parent = item.parent;
+  if (node && (typeof node === 'object')) {
 
     // valid node so push it to the list and set new parent
     if ('type' in node) {
@@ -149,18 +114,59 @@ function breadthFirst(node, parent) {
       results.push(node);
     }
 
-    // recurse object members using the queue
+    // recurse object members using nested function call
     for (var key in node) {
       if (WHITE_LIST.test(key)) {
         var value = node[key];
         if (value && (typeof value === 'object')) {
-          queue.push({node:value, parent:parent});
+          results.push.apply(results, depthFirst(value, parent));
         }
       }
     }
   }
+  return results;
+}
 
-  // complete
+/**
+ * List the given node and all children, breadth first.
+ * @param {object} node An esprima node
+ * @param {object|undefined} [parent] The parent of the given node, where known
+ * @returns {Array} A list of nodes
+ */
+function breadthFirst(node, parent) {
+  var results = [];
+  if (node && (typeof node === 'object')) {
+
+    // begin the queue with the given node
+    var queue = [{node:node, parent:parent}];
+    while (queue.length) {
+
+      // pull the next item from the front of the queue
+      var item = queue.shift();
+      var node = item.node;
+      var parent = item.parent;
+
+      // valid node so push it to the list and set new parent
+      if ('type' in node) {
+        node.parent = parent;
+        parent = node;
+        results.push(node);
+      }
+
+      // recurse object members using the queue
+      for (var key in node) {
+        if (WHITE_LIST.test(key)) {
+          var value = node[key];
+          if (value && (typeof value === 'object')) {
+            queue.push({
+              node  : value,
+              parent: parent
+            });
+          }
+        }
+      }
+    }
+  }
   return results;
 }
 
