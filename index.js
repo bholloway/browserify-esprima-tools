@@ -48,8 +48,11 @@ function createTransform(updater, format) {
         return done(exception);
       }
 
-      // associate comments with nodes they annotate
-      associateComments(ast);
+      // sort nodes before changing the source-map
+      var sorted = orderNodes(ast);
+
+      // associate comments with nodes they annotate before changing the sort map
+      associateComments(ast, sorted);
 
       // make sure the AST has the data from the original source map
       var converter     = convert.fromSource(content);
@@ -87,14 +90,17 @@ function createTransform(updater, format) {
 }
 
 /**
- * Sort given node an all children by location, include comments, create parent reference
+ * Sort given node an all children by sort index (where present) or source map location.
+ * Includes comments, creates parent reference, and sets sort index if not present.
  * @param {object} ast The esprima syntax tree
  */
 function orderNodes(ast) {
-  var comments = Array.isArray(ast.comments) ? ast.comments.slice() : [];
+  var comments  = Array.isArray(ast.comments) ? ast.comments.slice() : [];
+  var comparitor = ('sortIndex' in ast) ? compareIndex : compareLocation;
   return comments
     .concat(depthFirst(ast, ast.parent))
-    .sort(compareLocation);
+    .sort(comparitor)
+    .map(setSortIndex);
 }
 
 /**
@@ -108,9 +114,12 @@ function depthFirst(node, parent) {
   if (node && (typeof node === 'object')) {
 
     // valid node so push it to the list and set new parent
+    //  don't overwrite parent if one was not given
     if ('type' in node) {
-      node.parent = parent;
-      parent      = node;
+      if (parent !== undefined) {
+        node.parent = parent;
+      }
+      parent = node;
       results.push(node);
     }
 
@@ -142,13 +151,16 @@ function breadthFirst(node, parent) {
     while (queue.length) {
 
       // pull the next item from the front of the queue
-      var item = queue.shift();
-      var node = item.node;
+      var item   = queue.shift();
+      var node   = item.node;
       var parent = item.parent;
 
       // valid node so push it to the list and set new parent
+    //  don't overwrite parent if one was not given
       if ('type' in node) {
-        node.parent = parent;
+        if (parent !== undefined) {
+          node.parent = parent;
+        }
         parent = node;
         results.push(node);
       }
@@ -171,39 +183,31 @@ function breadthFirst(node, parent) {
 }
 
 /**
- * Create a setter that will replace the given node.
+ * Create a setter that will replace the given node or insert relative to it.
  * @param {object} candidate An esprima AST node to match
- * @param {number} [offset] 0 to replace, -1 to prepend, +1 to append
- * @returns {function|null} A setter that will replace the given node or Null on bad node
+ * @param {number} [offset] 0 to replace, -1 to insert before node, +1 to insert after node
+ * @returns {function|null} A setter that will replace the given node or do nothing if not valid
  */
 function nodeSplicer(candidate, offset) {
-  var found = findReferrer(candidate);
-  if (found) {
-    var key   = found.key;
-    var obj   = found.object;
-    var array = Array.isArray(obj) && obj;
-    if (offset && !array) {
-      throw new Error('Cannot splice with offset since the container is not an array');
-    }
-    else if (!array) {
-      return function setter(value) {
+  offset = offset || 0;
+  return function setter(value) {
+    var found = findReferrer(candidate);
+    if (found) {
+      var key       = found.key;
+      var obj       = found.object;
+      var array     = Array.isArray(obj) && obj;
+      var isNumeric = (typeof key === 'number');
+      if (!array) {
         obj[key] = value;
-      };
-    }
-    else if (offset < 0) {
-      return function setter(value) {
-        array.splice(key, 0, value);
-      };
-    }
-    else if (offset > 0) {
-      return function setter(value) {
-        array.splice(key + 1, 0, value);
-      };
-    }
-    else {
-      return function setter(value) {
-        array.splice(key, 1, value);
-      };
+      }
+      else if (!isNumeric) {
+        throw new Error('A numerical key is required to splice an array');
+      }
+      else {
+        var index  = Math.max(0, Math.min(array.length, key + offset + Number(offset < 0)));
+        var remove = Number(offset === 0);
+        array.splice(index, remove, value);
+      }
     }
   }
 }
@@ -220,8 +224,7 @@ module.exports = {
  * Associate comments with the node that follows them per an <code>annotates</code> property.
  * @param {object} ast An esprima AST with comments array
  */
-function associateComments(ast) {
-  var sorted = orderNodes(ast);
+function associateComments(ast, sorted) {
   ast.comments
     .forEach(function eachComment(comment) {
 
@@ -250,7 +253,7 @@ function compareLocation(nodeA, nodeB) {
     return 0;
   }
   else if (Boolean(locA) !== Boolean(locB)) {
-    return locB ? +1 : locA ? -1 : 0;
+    return locA ? +1 : locB ? -1 : 0;
   }
   else {
     var result =
@@ -270,6 +273,39 @@ function compareLocation(nodeA, nodeB) {
  */
 function isOrdered(tupleA, tupleB) {
   return (tupleA.line < tupleB.line) || ((tupleA.line === tupleB.line) && (tupleA.column < tupleB.column));
+}
+
+/**
+ * Compare function for nodes with sort-index.
+ * @param {object} nodeA First node
+ * @param {object} nodeB Second node
+ * @returns {number} -1 where a follows b, +1 where b follows a, 0 otherwise
+ */
+function compareIndex(nodeA, nodeB) {
+  var indexA = nodeA && nodeA.sortIndex;
+  var indexB = nodeB && nodeB.sortIndex;
+  if (!indexA && !indexB) {
+    return 0;
+  }
+  else if (Boolean(indexA) !== Boolean(indexB)) {
+    return indexA ? +1 : indexB ? -1 : 0;
+  }
+  else {
+    return indexA - indexB;
+  }
+}
+
+/**
+ * Set a node with a <code>sortIndex</code> where not already set.
+ * @param {object} node The node to set
+ * @param {number} index The index to set
+ * @returns {object} The given value
+ */
+function setSortIndex(node, index) {
+  if (!('sortIndex' in node)) {
+    node.sortIndex = index;
+  }
+  return node;
 }
 
 /**
