@@ -5,6 +5,8 @@
  */
 'use strict';
 
+var path = require('path');
+
 var codegen        = require('escodegen'),
     esprima        = require('esprima'),
     through        = require('through2'),
@@ -78,8 +80,12 @@ function createTransform(updater, format) {
         format           : format || {}
       });
 
-      // ensure that the source map has sourcesContent or browserify will not work
-      pair.map.setSourceContent(file, sourceContent);
+      // ensure that the source-map has sourcesContent or browserify will not work
+      //  source-map source files are posix so we have to slash them
+      var posixPath = file.replace(/\\/g, '/');
+      pair.map.setSourceContent(posixPath, sourceContent);
+
+      // convert the map to base64 embedded comment
       var mapComment = convert.fromJSON(pair.map.toString()).toComment();
 
       // push to the output
