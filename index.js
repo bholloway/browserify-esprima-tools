@@ -5,8 +5,6 @@
  */
 'use strict';
 
-var path = require('path');
-
 var codegen        = require('escodegen'),
     esprima        = require('esprima'),
     through        = require('through2'),
@@ -37,62 +35,74 @@ function createTransform(updater, format) {
     function flush(done) {
       /* jshint validthis:true */
       var content = chunks.join('');
-
-      // parse code to AST using esprima
-      var ast;
+      var altered;
       try {
-        ast = esprima.parse(content, {
-          loc    : true,
-          comment: true,
-          source : file
-        });
+        altered = processSync(file, content, updater, format);
       } catch(exception) {
-        return done(exception);
+        done(exception);
       }
-
-      // sort nodes before changing the source-map
-      var sorted = orderNodes(ast);
-
-      // associate comments with nodes they annotate before changing the sort map
-      associateComments(ast, sorted);
-
-      // make sure the AST has the data from the original source map
-      var converter     = convert.fromSource(content);
-      var originalMap   = converter && converter.toObject();
-      var sourceContent = content;
-      if (originalMap) {
-        sourcemapToAst(ast, originalMap);
-        sourceContent = originalMap.sourcesContent[0];
+      if (altered) {
+        this.push(new Buffer(altered));
+        done();
       }
-
-      // update the AST
-      var updated;
-      try {
-        updated = ((typeof updater === 'function') && updater(file, ast)) || ast;
-      } catch(exception) {
-        return done(exception);
-      }
-
-      // generate compressed code from the AST
-      var pair = codegen.generate(updated, {
-        sourceMap        : true,
-        sourceMapWithCode: true,
-        format           : format || {}
-      });
-
-      // ensure that the source-map has sourcesContent or browserify will not work
-      //  source-map source files are posix so we have to slash them
-      var posixPath = file.replace(/\\/g, '/');
-      pair.map.setSourceContent(posixPath, sourceContent);
-
-      // convert the map to base64 embedded comment
-      var mapComment = convert.fromJSON(pair.map.toString()).toComment();
-
-      // push to the output
-      this.push(new Buffer(pair.code + mapComment));
-      done();
     }
   };
+}
+
+/**
+ * Synchronously process the given content and apply the updater function on its AST then output with the given format.
+ * @throws {Error} Esprima parse error or updater error
+ * @param {string} filename The name of the file that contains the given content
+ * @param {*} content The text content to parse
+ * @param {function} updater A function that works on the esprima AST
+ * @param {object} [format] An optional format for escodegen
+ * @returns {string} The transformed content with base64 source-map comment
+ */
+function processSync(filename, content, updater, format) {
+  var text = String(content);
+
+  // parse code to AST using esprima
+  var ast = esprima.parse(text, {
+    loc    : true,
+    comment: true,
+    source : filename
+  });
+
+  // sort nodes before changing the source-map
+  var sorted = orderNodes(ast);
+
+  // associate comments with nodes they annotate before changing the sort map
+  associateComments(ast, sorted);
+
+  // make sure the AST has the data from the original source map
+  var converter     = convert.fromSource(text);
+  var originalMap   = converter && converter.toObject();
+  var sourceContent = text;
+  if (originalMap) {
+    sourcemapToAst(ast, originalMap);
+    sourceContent = originalMap.sourcesContent[0];
+  }
+
+  // update the AST
+  var updated = ((typeof updater === 'function') && updater(filename, ast)) || ast;
+
+  // generate compressed code from the AST
+  var pair = codegen.generate(updated, {
+    sourceMap        : true,
+    sourceMapWithCode: true,
+    format           : format || {}
+  });
+
+  // ensure that the source-map has sourcesContent or browserify will not work
+  //  source-map source files are posix so we have to slash them
+  var posixPath = filename.replace(/\\/g, '/');
+  pair.map.setSourceContent(posixPath, sourceContent);
+
+  // convert the map to base64 embedded comment
+  var mapComment = convert.fromJSON(pair.map.toString()).toComment();
+
+  // complete
+  return pair.code + mapComment;
 }
 
 /**
@@ -162,7 +172,7 @@ function breadthFirst(node, parent) {
       var parent = item.parent;
 
       // valid node so push it to the list and set new parent
-    //  don't overwrite parent if one was not given
+      //  don't overwrite parent if one was not given
       if ('type' in node) {
         if (parent !== undefined) {
           node.parent = parent;
@@ -220,6 +230,7 @@ function nodeSplicer(candidate, offset) {
 
 module.exports = {
   createTransform: createTransform,
+  processSync    : processSync,
   orderNodes     : orderNodes,
   depthFirst     : depthFirst,
   breadthFirst   : breadthFirst,
