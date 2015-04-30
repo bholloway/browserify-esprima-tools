@@ -61,48 +61,56 @@ function createTransform(updater, format) {
 function processSync(filename, content, updater, format) {
   var text = String(content);
 
-  // parse code to AST using esprima
-  var ast = esprima.parse(text, {
-    loc    : true,
-    comment: true,
-    source : filename
-  });
+  // extract source map from the source
+  var converter = convert.fromSource(text);
+  if (converter) {
 
-  // sort nodes before changing the source-map
-  var sorted = orderNodes(ast);
+    // parse code to AST using esprima
+    var ast = esprima.parse(text, {
+      loc    : true,
+      comment: true,
+      source : filename
+    });
 
-  // associate comments with nodes they annotate before changing the sort map
-  associateComments(ast, sorted);
+    // sort nodes before changing the source-map
+    var sorted = orderNodes(ast);
 
-  // make sure the AST has the data from the original source map
-  var converter     = convert.fromSource(text);
-  var originalMap   = converter && converter.toObject();
-  var sourceContent = text;
-  if (originalMap) {
-    sourcemapToAst(ast, originalMap);
-    sourceContent = originalMap.sourcesContent[0];
+    // associate comments with nodes they annotate before changing the sort map
+    associateComments(ast, sorted);
+
+    // make sure the AST has the data from the original source map
+    var originalMap = converter.toObject();
+    var sourceContent = text;
+    if (originalMap) {
+      sourcemapToAst(ast, originalMap);
+      sourceContent = originalMap.sourcesContent[0];
+    }
+
+    // update the AST
+    var updated = ((typeof updater === 'function') && updater(filename, ast)) || ast;
+
+    // generate compressed code from the AST
+    var pair = codegen.generate(updated, {
+      sourceMap        : true,
+      sourceMapWithCode: true,
+      format           : format || {}
+    });
+
+    // ensure that the source-map has sourcesContent or browserify will not work
+    //  source-map source files are posix so we have to slash them
+    var posixPath = filename.replace(/\\/g, '/');
+    pair.map.setSourceContent(posixPath, sourceContent);
+
+    // convert the map to base64 embedded comment
+    var mapComment = convert.fromJSON(pair.map.toString()).toComment();
+
+    // complete
+    return pair.code + mapComment;
   }
-
-  // update the AST
-  var updated = ((typeof updater === 'function') && updater(filename, ast)) || ast;
-
-  // generate compressed code from the AST
-  var pair = codegen.generate(updated, {
-    sourceMap        : true,
-    sourceMapWithCode: true,
-    format           : format || {}
-  });
-
-  // ensure that the source-map has sourcesContent or browserify will not work
-  //  source-map source files are posix so we have to slash them
-  var posixPath = filename.replace(/\\/g, '/');
-  pair.map.setSourceContent(posixPath, sourceContent);
-
-  // convert the map to base64 embedded comment
-  var mapComment = convert.fromJSON(pair.map.toString()).toComment();
-
-  // complete
-  return pair.code + mapComment;
+  // no source map implies a file that we cannot parse
+  else {
+    return content;
+  }
 }
 
 /**
@@ -167,9 +175,9 @@ function breadthFirst(node, parent) {
     while (queue.length) {
 
       // pull the next item from the front of the queue
-      var item   = queue.shift();
-      var node   = item.node;
-      var parent = item.parent;
+      var item = queue.shift();
+      node   = item.node;
+      parent = item.parent;
 
       // valid node so push it to the list and set new parent
       //  don't overwrite parent if one was not given
@@ -225,7 +233,7 @@ function nodeSplicer(candidate, offset) {
         array.splice(index, remove, value);
       }
     }
-  }
+  };
 }
 
 module.exports = {
