@@ -15,16 +15,19 @@ var WHITE_LIST = /^(?!id|loc|comments|parent).*$/;
 
 /**
  * Create a Browserify transform that works on an esprima syntax tree
+ * @param {RegExp|null} filter A regexp that must pass for the file to be processed, or null for update all
  * @param {function} updater A function that works on the esprima AST
  * @param {object} [format] An optional format for escodegen
  * @returns {function} A browserify transform
  */
-function createTransform(updater, format) {
-
-  // transform
+function createTransform(filter, updater, format) {
   return function browserifyTransform(file) {
     var chunks = [];
-    return through(transform, flush);
+    if (!filter || filter.test(file)) {
+      return through(transform, flush);
+    } else {
+      return through();
+    }
 
     function transform(chunk, encoding, done) {
       /* jshint validthis:true */
@@ -61,56 +64,48 @@ function createTransform(updater, format) {
 function processSync(filename, content, updater, format) {
   var text = String(content);
 
-  // extract source map from the source
-  var converter = convert.fromSource(text);
-  if (converter) {
+  // parse code to AST using esprima
+  var ast = esprima.parse(text, {
+    loc    : true,
+    comment: true,
+    source : filename
+  });
 
-    // parse code to AST using esprima
-    var ast = esprima.parse(text, {
-      loc    : true,
-      comment: true,
-      source : filename
-    });
+  // sort nodes before changing the source-map
+  var sorted = orderNodes(ast);
 
-    // sort nodes before changing the source-map
-    var sorted = orderNodes(ast);
+  // associate comments with nodes they annotate before changing the sort map
+  associateComments(ast, sorted);
 
-    // associate comments with nodes they annotate before changing the sort map
-    associateComments(ast, sorted);
-
-    // make sure the AST has the data from the original source map
-    var originalMap = converter.toObject();
-    var sourceContent = text;
-    if (originalMap) {
-      sourcemapToAst(ast, originalMap);
-      sourceContent = originalMap.sourcesContent[0];
-    }
-
-    // update the AST
-    var updated = ((typeof updater === 'function') && updater(filename, ast)) || ast;
-
-    // generate compressed code from the AST
-    var pair = codegen.generate(updated, {
-      sourceMap        : true,
-      sourceMapWithCode: true,
-      format           : format || {}
-    });
-
-    // ensure that the source-map has sourcesContent or browserify will not work
-    //  source-map source files are posix so we have to slash them
-    var posixPath = filename.replace(/\\/g, '/');
-    pair.map.setSourceContent(posixPath, sourceContent);
-
-    // convert the map to base64 embedded comment
-    var mapComment = convert.fromJSON(pair.map.toString()).toComment();
-
-    // complete
-    return pair.code + mapComment;
+  // make sure the AST has the data from the original source map
+  var converter     = convert.fromSource(text);
+  var originalMap   = converter && converter.toObject();
+  var sourceContent = text;
+  if (originalMap) {
+    sourcemapToAst(ast, originalMap);
+    sourceContent = originalMap.sourcesContent[0];
   }
-  // no source map implies a file that we cannot parse
-  else {
-    return content;
-  }
+
+  // update the AST
+  var updated = ((typeof updater === 'function') && updater(filename, ast)) || ast;
+
+  // generate compressed code from the AST
+  var pair = codegen.generate(updated, {
+    sourceMap        : true,
+    sourceMapWithCode: true,
+    format           : format || {}
+  });
+
+  // ensure that the source-map has sourcesContent or browserify will not work
+  //  source-map source files are posix so we have to slash them
+  var posixPath = filename.replace(/\\/g, '/');
+  pair.map.setSourceContent(posixPath, sourceContent);
+
+  // convert the map to base64 embedded comment
+  var mapComment = convert.fromJSON(pair.map.toString()).toComment();
+
+  // complete
+  return pair.code + mapComment;
 }
 
 /**
