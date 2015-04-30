@@ -15,18 +15,23 @@ var WHITE_LIST = /^(?!id|loc|comments|parent).*$/;
 
 /**
  * Create a Browserify transform that works on an esprima syntax tree
- * @param {RegExp|null} filter A regexp that must pass for the file to be processed, or null for update all
+ * Options include:
+ *  filter:RegExp|function - A regex or function that returns truthy for files that are to be included
+ *  failSilently:bool - Don't throw exceptions just pass-through the input to the output
  * @param {function} updater A function that works on the esprima AST
- * @param {object} [format] An optional format for escodegen
+ * @param {object} [options] A hash of options, mostly format for escodegen
  * @returns {function} A browserify transform
  */
-function createTransform(filter, updater, format) {
+function createTransform(updater, options) {
+  options = options || {};
   return function browserifyTransform(file) {
-    var chunks = [];
-    if (!filter || filter.test(file)) {
-      return through(transform, flush);
-    } else {
+    var chunks     = [];
+    var filter     = options.filter;
+    var isExcluded = (typeof filter === 'object') && (typeof filter.test === 'function') && !filter.test(file);
+    if (isExcluded) {
       return through();
+    } else {
+      return through(transform, flush);
     }
 
     function transform(chunk, encoding, done) {
@@ -38,14 +43,27 @@ function createTransform(filter, updater, format) {
     function flush(done) {
       /* jshint validthis:true */
       var content = chunks.join('');
-      var altered;
-      try {
-        altered = processSync(file, content, updater, format);
-      } catch(exception) {
-        done(exception);
+      var output;
+
+      // no filter function or filter function returns truthy
+      var isIncluded = (typeof filter !== 'function') || filter(file, content);
+      if (isIncluded) {
+        try {
+          output = processSync(file, content, updater, options);
+        } catch(exception) {
+          output = (options.failSilently) ? content : exception;
+        }
       }
-      if (altered) {
-        this.push(new Buffer(altered));
+      // failed filter function implies no change
+      else {
+        output = content;
+      }
+
+      // throw error or push output to stream
+      if (output instanceof Error) {
+        done(output);
+      } else {
+        this.push(new Buffer(output));
         done();
       }
     }
