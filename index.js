@@ -222,7 +222,7 @@ function breadthFirst(node, parent) {
 /**
  * Create a setter that will replace the given node or insert relative to it.
  * @param {object} candidate An esprima AST node to match
- * @param {number} [offset] 0 to replace, -1 to insert before node, +1 to insert after node
+ * @param {number|function} [offset] 0 to replace, -1 to insert before node, +1 to insert after node
  * @returns {function|null} A setter that will replace the given node or do nothing if not valid
  */
 function nodeSplicer(candidate, offset) {
@@ -230,17 +230,19 @@ function nodeSplicer(candidate, offset) {
   return function setter(value) {
     var found = findReferrer(candidate);
     if (found) {
-      var key       = found.key;
-      var obj       = found.object;
-      var array     = Array.isArray(obj) && obj;
-      var isNumeric = (typeof key === 'number');
+      var key   = found.key;
+      var obj   = found.object;
+      var array = Array.isArray(obj) && obj;
       if (!array) {
         obj[key] = value;
       }
-      else if (!isNumeric) {
+      else if (typeof key !== 'number') {
         throw new Error('A numerical key is required to splice an array');
       }
       else {
+        if (typeof offset === 'function') {
+          offset = offset(array, candidate, value);
+        }
         var index  = Math.max(0, Math.min(array.length, key + offset + Number(offset < 0)));
         var remove = Number(offset === 0);
         array.splice(index, remove, value);
